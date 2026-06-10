@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Air Quality Monitor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#21262d;
+  --text:#e6edf3;--muted:#8d8590;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;
+  --cyan:#39d3f2;--orange:#f0883e;--purple:#bc8cff;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;padding:24px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.header-left h1{font-family:'IBM Plex Mono',monospace;font-size:1.05rem;font-weight:600;letter-spacing:.05em;color:var(--cyan)}
+.header-left p{font-size:.72rem;color:var(--muted);margin-top:3px;font-family:'IBM Plex Mono',monospace}
+.status-pill{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:.72rem;font-family:'IBM Plex Mono',monospace;color:var(--muted);transition:all .3s}
+.status-pill.connected{border-color:var(--green);color:var(--green)}
+.status-pill.error{border-color:var(--red);color:var(--red)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.dot.pulse{animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+#alert-banner{display:none;align-items:center;gap:10px;background:rgba(248,81,73,.1);border:1px solid var(--red);border-radius:8px;padding:12px 18px;margin-bottom:22px;font-size:.82rem;color:var(--red);font-family:'IBM Plex Mono',monospace}
+#alert-banner.show{display:flex}
+#alert-dismiss{margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;opacity:.7}
+#alert-dismiss:hover{opacity:1}
+
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;position:relative;overflow:hidden;transition:border-color .3s}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent,var(--border));transition:background .3s}
+.card-label{font-size:.65rem;font-family:'IBM Plex Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.card-value{font-family:'IBM Plex Mono',monospace;font-size:2.2rem;font-weight:600;line-height:1;color:var(--accent,var(--text));transition:color .3s}
+.card-unit{font-size:.8rem;font-weight:400;color:var(--muted);margin-left:3px}
+.card-sub{font-size:.68rem;color:var(--muted);margin-top:7px;font-family:'IBM Plex Mono',monospace}
+.card-icon{position:absolute;top:16px;right:16px;font-size:1.3rem;opacity:.15}
+.gauge-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:10px}
+.gauge-fill{height:100%;border-radius:2px;background:var(--green);transition:width .6s ease,background .3s;width:0%}
+.gauge-labels{display:flex;justify-content:space-between;font-size:.6rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;margin-top:3px}
+
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px}
+@media(max-width:680px){.charts{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.chart-title{font-size:.65rem;font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.chart-wrap{position:relative;height:180px}
+
+/* ── SETTINGS & STATS SECTION ── */
+.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px}
+@media(max-width:680px){.bottom-grid{grid-template-columns:1fr}}
+
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.panel-title{font-size:.65rem;font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+
+/* threshold rows */
+.threshold-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.threshold-row label{font-size:.75rem;font-family:'IBM Plex Mono',monospace;color:var(--muted);flex:0 0 80px}
+.threshold-row input[type=range]{flex:1;accent-color:var(--cyan);height:4px}
+.threshold-val{font-size:.8rem;font-family:'IBM Plex Mono',monospace;font-weight:600;min-width:52px;text-align:right}
+.threshold-val.ok{color:var(--green)}
+.threshold-val.warn{color:var(--yellow)}
+.threshold-val.danger{color:var(--red)}
+.apply-btn{margin-top:4px;width:100%;padding:8px;background:rgba(57,211,242,.08);border:1px solid rgba(57,211,242,.3);border-radius:6px;color:var(--cyan);font-family:'IBM Plex Mono',monospace;font-size:.75rem;cursor:pointer;transition:background .2s}
+.apply-btn:hover{background:rgba(57,211,242,.15)}
+
+/* stats table */
+.stats-table{width:100%;border-collapse:collapse}
+.stats-table th{font-size:.62rem;font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 0 8px;text-align:left;border-bottom:1px solid var(--border)}
+.stats-table th:not(:first-child){text-align:right}
+.stats-table td{font-size:.78rem;font-family:'IBM Plex Mono',monospace;padding:8px 0 0;color:var(--text);border-bottom:1px solid var(--border)}
+.stats-table td:not(:first-child){text-align:right;color:var(--muted)}
+.stats-table tr:last-child td{border-bottom:none}
+.metric-name{color:var(--muted)}
+.no-data{font-size:.72rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;text-align:center;padding:20px 0}
+
+footer{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:.65rem;font-family:'IBM Plex Mono',monospace;color:var(--muted)}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.flash{animation:flash .5s}
+@keyframes flash{0%,100%{opacity:1}50%{opacity:.4}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>AIR_QUALITY_MONITOR</h1>
+    <p>broker.hivemq.com &middot; portfolio/airquality/#</p>
+  </div>
+  <div class="status-pill" id="status-pill">
+    <span class="dot" id="status-dot"></span>
+    <span id="status-text">connecting&hellip;</span>
+  </div>
+</header>
+
+<div id="alert-banner">
+  <span>&#9888;</span>
+  <span id="alert-msg">High CO&#8322; detected</span>
+  <button id="alert-dismiss" title="Dismiss">&#x2715;</button>
+</div>
+
+<div class="metrics">
+  <div class="card" id="card-temp" style="--accent:var(--orange)">
+    <span class="card-icon">&#127777;</span>
+    <div class="card-label">Temperature</div>
+    <div class="card-value" id="val-temp">&mdash;<span class="card-unit">&deg;C</span></div>
+    <div class="card-sub" id="sub-temp">awaiting data</div>
+  </div>
+  <div class="card" id="card-hum" style="--accent:var(--cyan)">
+    <span class="card-icon">&#128167;</span>
+    <div class="card-label">Humidity</div>
+    <div class="card-value" id="val-hum">&mdash;<span class="card-unit">%</span></div>
+    <div class="card-sub" id="sub-hum">awaiting data</div>
+  </div>
+  <div class="card" id="card-co2" style="--accent:var(--green)">
+    <span class="card-icon">&#127807;</span>
+    <div class="card-label">CO&#8322; (estimated)</div>
+    <div class="card-value" id="val-co2">&mdash;<span class="card-unit">ppm</span></div>
+    <div class="gauge-track"><div class="gauge-fill" id="co2-gauge"></div></div>
+    <div class="gauge-labels"><span>400</span><span>1000</span><span>2000</span></div>
+  </div>
+  <div class="card" id="card-device" style="--accent:var(--purple)">
+    <span class="card-icon">&#128225;</span>
+    <div class="card-label">Device Status</div>
+    <div class="card-value" style="font-size:1.2rem;padding-top:6px" id="val-device">OFFLINE</div>
+    <div class="card-sub" id="sub-device">no packets received</div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-card">
+    <div class="chart-title">Temperature &mdash; last 12 h</div>
+    <div class="chart-wrap"><canvas id="chart-temp" role="img" aria-label="Temperature readings over last 12 hours">Temperature history chart.</canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">CO&#8322; &mdash; last 12 h</div>
+    <div class="chart-wrap"><canvas id="chart-co2" role="img" aria-label="CO2 readings over last 12 hours">CO2 history chart.</canvas></div>
+  </div>
+</div>
+
+<!-- Settings + Stats -->
+<div class="bottom-grid">
+
+  <!-- THRESHOLD SETTINGS -->
+  <div class="panel">
+    <div class="panel-title">Alert Thresholds</div>
+
+    <div class="threshold-row">
+      <label>Temp max</label>
+      <input type="range" id="thr-temp" min="20" max="50" step="1" value="35"/>
+      <span class="threshold-val" id="thr-temp-val">35 &deg;C</span>
+    </div>
+    <div class="threshold-row">
+      <label>Humidity max</label>
+      <input type="range" id="thr-hum" min="30" max="95" step="1" value="70"/>
+      <span class="threshold-val" id="thr-hum-val">70 %</span>
+    </div>
+    <div class="threshold-row">
+      <label>CO&#8322; max</label>
+      <input type="range" id="thr-co2" min="400" max="2000" step="50" value="1000"/>
+      <span class="threshold-val" id="thr-co2-val">1000 ppm</span>
+    </div>
+
+    <button class="apply-btn" id="apply-thresholds">Apply thresholds</button>
+    <div class="card-sub" style="margin-top:10px" id="thr-status">&nbsp;</div>
+  </div>
+
+  <!-- STATISTICS -->
+  <div class="panel">
+    <div class="panel-title">Session Statistics</div>
+    <div id="stats-body">
+      <div class="no-data">No data yet &mdash; waiting for first packet</div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>ESP32 Smart Air Quality Monitor &mdash; portfolio project</span>
+  <span id="last-seen">last packet: &mdash;</span>
+</footer>
+
+<script>
+const BROKER      = 'wss://broker.hivemq.com:8884/mqtt';
+const TOPIC_DATA  = 'portfolio/airquality/data';
+const TOPIC_ALERT = 'portfolio/airquality/alerts';
+const MAX_AGE_MS  = 12 * 60 * 60 * 1000; // 12 hours
+
+// ── in-memory history ──────────────────────────────────
+const history = { ts:[], temp:[], hum:[], co2:[] };
+
+// ── thresholds (can be changed via sliders) ────────────
+let thresholds = { temp:35, hum:70, co2:1000 };
+
+let packetCount = 0;
+
+// ── trim old data beyond 12 h ──────────────────────────
+function trimHistory() {
+  const cutoff = Date.now() - MAX_AGE_MS;
+  while (history.ts.length && history.ts[0] < cutoff) {
+    history.ts.shift(); history.temp.shift();
+    history.hum.shift(); history.co2.shift();
+  }
+}
+
+// ── threshold slider live preview ──────────────────────
+function bindSlider(id, unit, decimals) {
+  const slider = document.getElementById('thr-'+id);
+  const label  = document.getElementById('thr-'+id+'-val');
+  slider.oninput = () => {
+    label.textContent = parseFloat(slider.value).toFixed(decimals) + ' ' + unit;
+  };
+}
+bindSlider('temp','°C',0);
+bindSlider('hum','%',0);
+bindSlider('co2','ppm',0);
+
+document.getElementById('apply-thresholds').onclick = () => {
+  thresholds.temp = parseFloat(document.getElementById('thr-temp').value);
+  thresholds.hum  = parseFloat(document.getElementById('thr-hum').value);
+  thresholds.co2  = parseFloat(document.getElementById('thr-co2').value);
+  document.getElementById('thr-status').textContent =
+    'Updated — temp ' + thresholds.temp + '°C  hum ' + thresholds.hum + '%  CO₂ ' + thresholds.co2 + ' ppm';
+  // recolour gauge immediately
+  if (history.co2.length) updateCO2(history.co2[history.co2.length-1]);
+};
+
+// ── statistics ─────────────────────────────────────────
+function calcStats(arr) {
+  if (!arr.length) return { min:'—', max:'—', avg:'—' };
+  const min = Math.min(...arr).toFixed(1);
+  const max = Math.max(...arr).toFixed(1);
+  const avg = (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1);
+  return { min, max, avg };
+}
+
+function renderStats() {
+  if (!history.ts.length) return;
+  const t = calcStats(history.temp);
+  const h = calcStats(history.hum);
+  const c = calcStats(history.co2);
+  document.getElementById('stats-body').innerHTML = `
+    <table class="stats-table">
+      <thead><tr>
+        <th>Metric</th><th>Min</th><th>Avg</th><th>Max</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td class="metric-name">Temp (°C)</td>
+          <td>${t.min}</td><td>${t.avg}</td><td>${t.max}</td>
+        </tr>
+        <tr>
+          <td class="metric-name">Humidity (%)</td>
+          <td>${h.min}</td><td>${h.avg}</td><td>${h.max}</td>
+        </tr>
+        <tr>
+          <td class="metric-name">CO₂ (ppm)</td>
+          <td>${c.min}</td><td>${c.avg}</td><td>${c.max}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="card-sub" style="margin-top:10px">${history.ts.length} reading${history.ts.length!==1?'s':''} in session</div>`;
+}
+
+// ── charts ─────────────────────────────────────────────
+function makeChart(id, color, unit) {
+  return new Chart(document.getElementById(id).getContext('2d'), {
+    type:'line',
+    data:{ labels:[], datasets:[{
+      data:[], borderColor:color, backgroundColor:color+'18',
+      borderWidth:2, pointRadius:2, pointBackgroundColor:color,
+      fill:true, tension:0.35
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation:{ duration:300 },
+      plugins:{ legend:{ display:false }, tooltip:{
+        backgroundColor:'#161b22', borderColor:'#21262d', borderWidth:1,
+        titleColor:'#7d8590', bodyColor:'#e6edf3',
+        callbacks:{ label: ctx => ' '+ctx.parsed.y+' '+unit }
+      }},
+      scales:{
+        x:{ ticks:{ color:'#7d8590', font:{ family:'IBM Plex Mono', size:10 }, maxRotation:0, maxTicksLimit:6 }, grid:{ color:'#21262d' }},
+        y:{ ticks:{ color:'#7d8590', font:{ family:'IBM Plex Mono', size:10 }}, grid:{ color:'#21262d' }}
+      }
+    }
+  });
+}
+
+const chartTemp = makeChart('chart-temp','#f0883e','°C');
+const chartCO2  = makeChart('chart-co2','#3fb950','ppm');
+
+function refreshCharts() {
+  trimHistory();
+  const labels = history.ts.map(t => {
+    const d = new Date(t);
+    return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+  });
+  chartTemp.data.labels = labels;
+  chartTemp.data.datasets[0].data = [...history.temp];
+  chartCO2.data.labels  = labels;
+  chartCO2.data.datasets[0].data  = [...history.co2];
+  chartTemp.update();
+  chartCO2.update();
+}
+
+// ── card updates ───────────────────────────────────────
+function flash(id){ const e=document.getElementById(id); e.classList.remove('flash'); void e.offsetWidth; e.classList.add('flash'); }
+
+function updateTemp(v) {
+  const el = document.getElementById('val-temp');
+  el.innerHTML = v.toFixed(1)+'<span class="card-unit">°C</span>';
+  const feel = v<18?'Cold':v<24?'Comfortable':v<30?'Warm':'Hot';
+  document.getElementById('sub-temp').textContent = feel + (v>=thresholds.temp?' · ⚠ above threshold':'');
+  flash('card-temp');
+}
+function updateHum(v) {
+  document.getElementById('val-hum').innerHTML = v.toFixed(1)+'<span class="card-unit">%</span>';
+  const feel = v<30?'Dry':v<60?'Comfortable':'Humid';
+  document.getElementById('sub-hum').textContent = feel + (v>=thresholds.hum?' · ⚠ above threshold':'');
+  flash('card-hum');
+}
+function updateCO2(v) {
+  let col = v>=thresholds.co2 ? '#f85149' : v>=(thresholds.co2*0.7) ? '#d29922' : '#3fb950';
+  document.getElementById('val-co2').innerHTML = v+'<span class="card-unit">ppm</span>';
+  document.getElementById('val-co2').style.color = col;
+  document.getElementById('card-co2').style.setProperty('--accent', col);
+  const pct = Math.min(((v-400)/(2000-400))*100,100);
+  const g = document.getElementById('co2-gauge');
+  g.style.width = pct+'%'; g.style.background = col;
+  flash('card-co2');
+}
+function updateDevice() {
+  packetCount++;
+  document.getElementById('val-device').textContent = 'ONLINE';
+  document.getElementById('val-device').style.color = 'var(--green)';
+  document.getElementById('sub-device').textContent = packetCount+' packet'+(packetCount>1?'s':'')+' received';
+  document.getElementById('last-seen').textContent = 'last packet: '+new Date().toLocaleTimeString('en-GB',{hour12:false});
+  flash('card-device');
+}
+
+// ── alert ──────────────────────────────────────────────
+function showAlert(msg) {
+  document.getElementById('alert-msg').textContent = msg;
+  document.getElementById('alert-banner').classList.add('show');
+}
+document.getElementById('alert-dismiss').onclick = () => {
+  document.getElementById('alert-banner').classList.remove('show');
+};
+
+// ── MQTT ───────────────────────────────────────────────
+const client = mqtt.connect(BROKER, {
+  clientId:'dashboard_'+Math.random().toString(16).slice(2,8),
+  clean:true, connectTimeout:10000, reconnectPeriod:3000
+});
+
+const pill=document.getElementById('status-pill');
+const dot=document.getElementById('status-dot');
+const stxt=document.getElementById('status-text');
+
+client.on('connect',()=>{
+  pill.className='status-pill connected'; dot.className='dot pulse';
+  stxt.textContent='connected';
+  client.subscribe(TOPIC_DATA);
+  client.subscribe(TOPIC_ALERT);
+});
+client.on('reconnect',()=>{
+  pill.className='status-pill'; dot.className='dot';
+  stxt.textContent='reconnecting…';
+});
+client.on('error',()=>{
+  pill.className='status-pill error'; dot.className='dot';
+  stxt.textContent='error';
+});
+
+client.on('message',(topic,payload)=>{
+  const raw = payload.toString();
+  if (topic===TOPIC_ALERT) { showAlert(raw); return; }
+  if (topic===TOPIC_DATA) {
+    try {
+      const d = JSON.parse(raw);
+      const now = Date.now();
+
+      // update history
+      history.ts.push(now);
+      history.temp.push(d.temperature);
+      history.hum.push(d.humidity);
+      history.co2.push(d.co2);
+
+      // check custom thresholds
+      if (d.temperature >= thresholds.temp) showAlert('Temperature above threshold: '+d.temperature+'°C');
+      if (d.humidity    >= thresholds.hum)  showAlert('Humidity above threshold: '+d.humidity+'%');
+      if (d.co2         >= thresholds.co2)  showAlert('CO₂ above threshold: '+d.co2+' ppm');
+
+      updateTemp(d.temperature);
+      updateHum(d.humidity);
+      updateCO2(d.co2);
+      updateDevice();
+      refreshCharts();
+      renderStats();
+    } catch(e) { /* bad json */ }
+  }
+});
+</script>
+</body>
+</html>
