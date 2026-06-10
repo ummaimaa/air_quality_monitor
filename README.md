@@ -27,5 +27,5 @@ A low-power IoT solution for real-time air quality monitoring. This project feat
 2. Open `src/main.cpp` in VS Code (PlatformIO) or Arduino IDE.
 3. Install dependencies: `Adafruit SSD1306`, `DHT sensor library`, `PubSubClient`.
 4. Upload to ESP32.
-5. Open `dashboard/index.html` in any browser to view live data.
+5. Open `index.html` in any browser to view live data.
 
