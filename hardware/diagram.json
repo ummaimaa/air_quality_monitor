@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "author": "Ummaima",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": -57.6, "left": -196.76, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht1", "top": -191.7, "left": 4.2, "attrs": {} },
+    { "type": "wokwi-potentiometer", "id": "pot1", "top": -106.9, "left": 124.6, "attrs": {} },
+    {
+      "type": "board-ssd1306",
+      "id": "oled1",
+      "top": 118.34,
+      "left": -28.57,
+      "attrs": { "i2cAddress": "0x3c" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:GND.1", "dht1:GND", "black", [ "h-9.45", "v115.2", "h297.6", "v-288" ] ],
+    [ "esp:GND.2", "oled1:GND", "black", [ "h105.6", "v153.6" ] ],
+    [ "pot1:GND", "esp:GND.3", "black", [ "v0" ] ],
+    [ "esp:4", "dht1:SDA", "green", [ "h0" ] ],
+    [ "esp:21", "oled1:SDA", "green", [ "h0" ] ],
+    [ "oled1:SCL", "esp:22", "green", [ "v0" ] ],
+    [ "esp:34", "pot1:SIG", "green", [ "h-19.05", "v211.2", "h374.8" ] ],
+    [ "oled1:VCC", "pot1:VCC", "red", [ "v-48", "h154.55" ] ],
+    [ "esp:3V3", "oled1:VCC", "green", [ "v-38.4", "h211.2" ] ],
+    [ "oled1:VCC", "dht1:VCC", "red", [ "v-48", "h-220.65" ] ]
+  ],
+  "dependencies": {}
+}
